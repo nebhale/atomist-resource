@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Copyright 2017 the original author or authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+set -e -u
+
+exec 3>&1 # make stdout available as fd 3 for the result
+exec 1>&2 # redirect all output to stderr for logging
+
+PAYLOAD=$(mktemp /tmp/resource-in.XXXXXX)
+
+cat > "${PAYLOAD}" <&0
+
+BRANCH="$(jq -r '.source.branch' < "${PAYLOAD}")"
+REPONAME="$(jq -r '.source.reponame' < "${PAYLOAD}")"
+USERNAME="$(jq -r '.source.username' < "${PAYLOAD}")"
+
+LIFECYCLE="$(jq -r '.params.lifecycle' < "${PAYLOAD}")"
+REPOSITORY="$(jq -r '.params.repository' < "${PAYLOAD}")"
+
+pushd "${1}/${REPOSITORY}" > /dev/null
+  VCS_REVISION=$(git rev-parse HEAD)
+popd > /dev/null
+
+curl -X POST \
+  https://webhook.atomist.com/atomist/circle \
+  -H 'cache-control: no-cache' \
+  -H 'content-type: application/json' \
+  -d "{
+  \"payload\": {
+    \"build_url\" : \"${ATC_EXTERNAL_URL}/teams/${BUILD_TEAM_NAME}/pipelines/${BUILD_PIPELINE_NAME}/jobs/${BUILD_JOB_NAME}/builds/${BUILD_NAME}\",
+    \"build_num\" : ${BUILD_ID},
+    \"branch\" : \"${BRANCH}\",
+    \"vcs_revision\" : \"${VCS_REVISION}\",
+    \"why\" : \"github\",
+    \"username\" : \"${USERNAME}\",
+    \"reponame\" : \"${REPONAME}\",
+    \"lifecycle\" : \"${LIFECYCLE}\"
+  }
+}"
+
+jq -n "{
+  version: {
+    timestamp: \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"
+  }
+}" >&3
